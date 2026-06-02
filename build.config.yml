@@ -1,0 +1,74 @@
+# =============================================================================
+# OxiDNS 自定义编译配置
+# =============================================================================
+# 这是模版仓库里唯一需要你编辑的文件。改完 push 到 main 即可,
+# `watch-upstream.yml` 会在上游每次发布 release 时自动触发编译。
+#
+# 也可以在仓库的 Actions 页面手动触发 "Build OxiDNS Release"。
+# =============================================================================
+
+# 上游 oxidns 仓库,通常不需要改。
+upstream: svenshi/oxidns
+
+# 要编译的 bundle —— 决定产物文件名以及压缩包里是否包含 webui。
+#
+#   full      = oxidns-{target}.tar.gz           (含 webui)
+#   standard  = oxidns-standard-{target}.tar.gz  (含 webui)
+#   minimal   = oxidns-minimal-{target}.tar.gz   (不含 webui)
+#   custom    = oxidns-{target}.tar.gz           (按 features 自定义,文件名同 full)
+#
+# `custom` 模式下,oxidns upgrade 需要显式传 `--bundle full` 或 `--asset <name>`,
+# 因为 `--bundle auto` 在 PRIMARY_BUNDLE=custom 时会拒绝执行。
+bundle: custom
+
+# 仅 `bundle: custom` 时生效。一组 Cargo feature 名(对应 oxidns Cargo.toml
+# 里的 [features] 段)。常用组合参考:
+#
+#   - 家用路由器 (含 webui):
+#       [api, webui, server-doh, server-dot, upstream-doh, upstream-dot,
+#        plugin-cron, plugin-dynamic-domain, provider-protobuf,
+#        provider-adguard-rule, plugin-upgrade]
+#
+#   - 极简转发器 (无 webui, 体积最小):
+#       [minimal]
+#
+#   - 标准 + 自定义增强:
+#       [standard, plugin-mikrotik, plugin-ipset]
+features:
+  - api
+  - webui
+  - metrics
+  - server-dot
+  - server-doh
+  - upstream-dot
+  - upstream-doh
+  - upstream-doq
+  - provider-protobuf
+  - provider-adguard-rule
+  - plugin-cron
+  - plugin-dynamic-domain
+  - plugin-upgrade
+  - plugin-download
+
+# 要编译的目标平台。注释掉不需要的来加快 CI。
+# 完整列表必须用 oxidns 官方支持的 triple,否则 `oxidns upgrade` 找不到 asset。
+targets:
+  - x86_64-unknown-linux-gnu
+  - x86_64-unknown-linux-musl
+  - aarch64-unknown-linux-gnu
+  - aarch64-unknown-linux-musl
+  # - i686-unknown-linux-musl
+  # - arm-unknown-linux-musleabihf
+  - x86_64-apple-darwin
+  - aarch64-apple-darwin
+  # - x86_64-unknown-freebsd
+  - x86_64-pc-windows-msvc
+  # - i686-pc-windows-msvc
+  # - aarch64-pc-windows-msvc
+
+# 是否用 UPX 压缩二进制 (Linux/Windows 上有效, macOS/FreeBSD 跳过)。
+# 与上游一致默认开启,但失败不会终止流水线。
+upx: true
+
+# 是否同时生成 .deb 包 (仅对 x86_64-unknown-linux-gnu 和 aarch64-unknown-linux-gnu 有效)。
+make_deb: false

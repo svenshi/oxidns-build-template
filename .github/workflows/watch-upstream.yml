@@ -1,0 +1,65 @@
+name: Watch Upstream
+
+# 每 30 分钟轮询上游 oxidns 仓库的 latest release。
+# 检测到新版本就触发 build.yml,产出与上游版本同 tag 的 release。
+#
+# 也可以从 Actions 页手动 Run workflow 强制重新编译当前 latest。
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '即使本仓库已有该 tag 也强制重建'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      new: ${{ steps.check.outputs.new }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+          UPSTREAM=$(yq '.upstream' build.config.yml)
+          echo "upstream=$UPSTREAM"
+
+          LATEST=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
+          echo "latest=$LATEST"
+
+          LAST_BUILT=$(gh release view --repo "${{ github.repository }}" \
+            "$LATEST" --json tagName -q .tagName 2>/dev/null || echo "")
+          echo "last_built=$LAST_BUILT"
+
+          if [ -z "$LAST_BUILT" ] || [ "$FORCE" = "true" ]; then
+            echo "new=true"  >> "$GITHUB_OUTPUT"
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  trigger:
+    needs: detect
+    if: needs.detect.outputs.new == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      tag: ${{ needs.detect.outputs.tag }}
+    permissions:
+      contents: write

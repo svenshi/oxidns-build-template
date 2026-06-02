@@ -1,0 +1,72 @@
+name: Build OxiDNS Release
+
+# 这个 workflow 是个薄壳:读 build.config.yml,把参数喂给上游
+# svenshi/oxidns 仓库里维护的 reusable workflow。
+#
+# 编译矩阵 / 命名 / 打包逻辑都在上游的 .github/workflows/custom-build.yml,
+# 这样上游改了构建流程,所有用户重新触发即可,不需要更新模版仓库。
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: '上游 oxidns 的 release tag (例: v1.2.0)'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '上游 oxidns 的 release tag (例: v1.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # 读取 build.config.yml,转成上游 reusable workflow 的输入。
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      bundle:   ${{ steps.read.outputs.bundle }}
+      features: ${{ steps.read.outputs.features }}
+      targets:  ${{ steps.read.outputs.targets }}
+      upx:      ${{ steps.read.outputs.upx }}
+      make_deb: ${{ steps.read.outputs.make_deb }}
+      ref:      ${{ steps.read.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - id: read
+        run: |
+          set -euo pipefail
+          {
+            echo "bundle=$(yq '.bundle' build.config.yml)"
+            echo "features=$(yq -r '.features // [] | join(",")' build.config.yml)"
+            echo "targets=$(yq -o=json -I=0 '.targets' build.config.yml)"
+            echo "upx=$(yq '.upx' build.config.yml)"
+            echo "make_deb=$(yq '.make_deb' build.config.yml)"
+            # ref 锁定上游 reusable workflow 的版本。默认跟随上游 tag,
+            # 这样不同版本的编译流程改动可以平滑共存。改成 main 走最新逻辑。
+            echo "ref=${{ inputs.tag }}"
+          } >> "$GITHUB_OUTPUT"
+
+  # 调用上游 reusable workflow。github.repository / GITHUB_TOKEN 都是
+  # 调用方(本仓库)的,所以 release 会自动发布到本仓库。
+  build:
+    needs: config
+    uses: svenshi/oxidns/.github/workflows/custom-build.yml@main
+    with:
+      tag:      ${{ inputs.tag }}
+      bundle:   ${{ needs.config.outputs.bundle }}
+      features: ${{ needs.config.outputs.features }}
+      targets:  ${{ needs.config.outputs.targets }}
+      upx:      ${{ fromJson(needs.config.outputs.upx) }}
+      make_deb: ${{ fromJson(needs.config.outputs.make_deb) }}
+    secrets: inherit
