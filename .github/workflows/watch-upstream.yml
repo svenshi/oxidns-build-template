@@ -29,9 +29,8 @@ jobs:
   detect:
     runs-on: ubuntu-latest
     outputs:
-      new:          ${{ steps.check.outputs.new }}
-      ref:          ${{ steps.check.outputs.ref }}
-      workflow_ref: ${{ steps.check.outputs.workflow_ref }}
+      new: ${{ steps.check.outputs.new }}
+      ref: ${{ steps.check.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,23 +66,9 @@ jobs:
             exit 0
           fi
 
-          # Pick the workflow ref. By default we pin custom-build.yml to the
-          # same ref as the source so the pipeline tracks the version it
-          # builds. Fall back to `main` only when the workflow file does not
-          # exist at the source ref (e.g. very old release tags from before
-          # custom-build.yml was added).
-          if gh api "repos/$UPSTREAM/contents/.github/workflows/custom-build.yml?ref=$LATEST" \
-               --jq .name >/dev/null 2>&1; then
-            WORKFLOW_REF="$LATEST"
-          else
-            WORKFLOW_REF=main
-            echo "::notice::custom-build.yml does not exist at $UPSTREAM@$LATEST — falling back to custom-build.yml@main"
-          fi
-
           {
             echo "new=true"
             echo "ref=$LATEST"
-            echo "workflow_ref=$WORKFLOW_REF"
           } >> "$GITHUB_OUTPUT"
 
   trigger:
@@ -91,7 +76,6 @@ jobs:
     if: needs.detect.outputs.new == 'true'
     uses: ./.github/workflows/build.yml
     with:
-      ref:          ${{ needs.detect.outputs.ref }}
-      workflow_ref: ${{ needs.detect.outputs.workflow_ref }}
+      ref: ${{ needs.detect.outputs.ref }}
     permissions:
       contents: write

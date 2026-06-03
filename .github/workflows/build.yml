@@ -9,18 +9,21 @@ name: Build OxiDNS Release
 #                         `branch-<sanitized>-<sha7>`
 #   * a commit SHA      → same as branch
 #
-# `workflow_ref` (optional) selects which ref of custom-build.yml is used
-# as the build pipeline. Defaults to `ref` so the pipeline stays
-# version-locked with the source. Override to e.g. `main` to backfill an
-# old release with the latest pipeline.
+# To build "upstream's latest release" without typing the tag, run
+# `Watch Upstream` with `force: true` instead — it resolves the latest
+# release and triggers this workflow with explicit values.
 #
-# To build "upstream's latest release" without knowing the tag, run
-# `Watch Upstream` (workflow_dispatch with force: true) — that workflow
-# performs the resolution and then calls this one with explicit values.
+# About the hardcoded `@main` on the `uses:` line below:
+# GitHub Actions does not currently honor `inputs.*` / `needs.*` /
+# `vars.*` expressions in the `uses` field for reusable workflows,
+# despite the 2024-03 changelog claiming it does. Every attempt to use
+# expressions there fails with `Unrecognized named-value` at workflow
+# validation time. So the pipeline version is fixed to `@main`, while
+# the SOURCE code being built is dynamic (custom-build.yml itself
+# checks out svenshi/oxidns at `inputs.ref`).
 #
-# (Note: GitHub Actions does NOT allow `needs.*.outputs.*` in `uses:` for
-# reusable workflows — only `inputs.*` / `vars.*` / `github.*`. That is
-# why ref resolution must happen in the caller, not here.)
+# This is actually the better default: a pipeline fix on main applies
+# uniformly to every rebuild, including historical tags.
 
 on:
   workflow_call:
@@ -29,21 +32,11 @@ on:
         description: 'Upstream git ref to build (branch / tag / SHA).'
         required: true
         type: string
-      workflow_ref:
-        description: 'Ref of custom-build.yml to use. Empty = same as `ref`.'
-        required: false
-        default: ''
-        type: string
   workflow_dispatch:
     inputs:
       ref:
         description: 'Upstream git ref to build (branch / tag / SHA, e.g. v1.2.0, main, abc1234).'
         required: true
-        type: string
-      workflow_ref:
-        description: 'Ref of custom-build.yml to use. Leave empty to use the same ref as the source. Override to e.g. `main` when an old release pre-dates custom-build.yml.'
-        required: false
-        default: ''
         type: string
 
 permissions:
@@ -51,9 +44,9 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Parse build.config.yml and compute the release tag + prerelease flag for
-  # the given source ref. These outputs flow through `with:` (which supports
-  # `needs.*.outputs.*`), unlike the `uses:` ref which must come from inputs.
+  # Parse build.config.yml and compute the release_tag + prerelease flag for
+  # the given source ref. These outputs flow through `with:` which DOES
+  # accept `needs.*.outputs.*` (unlike the `uses:` ref, see file header).
   # ---------------------------------------------------------------------------
   plan:
     runs-on: ubuntu-latest
@@ -96,9 +89,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # For non-semver refs, append a 7-char commit SHA so the release tag
-          # is unique per commit and re-triggers replace the matching release
-          # cleanly instead of polluting the feed.
+          # For non-semver refs, append a 7-char commit SHA so the release
+          # tag is unique per commit and re-triggers replace the matching
+          # release cleanly instead of polluting the feed.
           SHA=$(gh api "repos/$UPSTREAM/commits/$REF" --jq '.sha' 2>/dev/null | head -c 7 || echo "")
 
           # A semver-ish tag (v1.2.3 / v1.2.3-rc1) → publish as a normal
@@ -126,20 +119,16 @@ jobs:
           echo "prerelease=$PRERELEASE"
 
   # ---------------------------------------------------------------------------
-  # Call the upstream reusable workflow.
-  #
-  # `uses:` only supports the `inputs`, `vars`, and `github` contexts — NOT
-  # `needs`. So the workflow ref must come from inputs, not from the plan
-  # job. The expression below picks `inputs.workflow_ref` when set, otherwise
-  # falls back to `inputs.ref`, so building v1.2.0 uses custom-build.yml@v1.2.0
-  # and building the main branch uses custom-build.yml@main by default.
+  # Call the upstream reusable workflow. The pipeline version is hardcoded
+  # to @main; the SOURCE ref is forwarded through `with: ref:` so each build
+  # builds the requested source while sharing one common pipeline.
   #
   # github.repository / GITHUB_TOKEN belong to this repo, so the release is
   # published here automatically.
   # ---------------------------------------------------------------------------
   build:
     needs: plan
-    uses: svenshi/oxidns/.github/workflows/custom-build.yml@${{ inputs.workflow_ref != '' && inputs.workflow_ref || inputs.ref }}
+    uses: svenshi/oxidns/.github/workflows/custom-build.yml@main
     with:
       ref:         ${{ inputs.ref }}
       release_tag: ${{ needs.plan.outputs.release_tag }}

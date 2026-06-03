@@ -16,11 +16,12 @@ svenshi/oxidns                    your-name/oxidns-build (从模版生成)
                                           ▼  读 build.config.yml
                                   build.yml (薄壳)
                                           │
-                                          ▼  uses: svenshi/oxidns/...@<同源码 ref>
+                                          ▼  uses: svenshi/oxidns/...@main
                           ┌───────────────────────────────────┐
                           │ svenshi/oxidns/.github/workflows/ │
                           │      custom-build.yml             │  ← 编译矩阵在这里
-                          │  (在调用方 runner 上执行)          │
+                          │  (在调用方 runner 上执行,内部     │
+                          │   checkout 源码到 inputs.ref)     │
                           └───────────────────┬───────────────┘
                                               │
                                               ▼
@@ -34,12 +35,13 @@ svenshi/oxidns                    your-name/oxidns-build (从模版生成)
 的 [`.github/workflows/custom-build.yml`](https://github.com/svenshi/oxidns/blob/main/.github/workflows/custom-build.yml) 中维护。
 派生仓库永远只持有一个 50 行的薄壳,不需要自己复制粘贴这套矩阵。
 
-模版在编译每个 ref 时,会优先用**同一个 ref 上的** `custom-build.yml`(例如
-编译 `v1.2.0` 时用 `custom-build.yml@v1.2.0`,编译 `main` 分支时用
-`custom-build.yml@main`)。这样工作流逻辑和源码版本严格绑定:
-上游在 `main` 改了构建流程不会反过来污染历史 release 的构建结果,新功能也只
-在切 tag 时随源码一起生效。当 ref 上不存在 `custom-build.yml`(例如非常老的
-release)时,自动回退到 `@main`。
+**关于 pipeline 版本固定 `@main`**:GitHub Actions 目前不允许 `uses:` 行从
+`inputs.*` / `needs.*` / `vars.*` 动态拼接(2024-03 的 changelog 描述的功能
+实际上拒绝所有非字面量),所以模版固定调用 `custom-build.yml@main`。**只有
+pipeline yaml 固定;被构建的源码 ref 仍然是动态的** —— `custom-build.yml`
+内部会 `actions/checkout` 把 svenshi/oxidns 切到 `inputs.ref`,所以你
+依然能用 `ref: v1.2.0` 编译那个 tag 的源码。实际效果上,这反而是更合理的
+默认:上游修 pipeline bug 时,所有历史构建重新触发都自动跟着修。
 
 ## 快速开始
 
@@ -66,16 +68,9 @@ release)时,自动回退到 `@main`。
 > 分支 / commit 构建发布的是 **prerelease**,既不会覆盖正式版,客户端也要显式
 > 加 `--allow-prerelease` 才会被升级到。
 
-`ref` 是必填的(GitHub Actions 限制 `uses:` 行不能从动态计算得到)。要"构建
-上游最新 release 但不想手填版本号",请改去 Actions 页面跑一次 **Watch Upstream**
-(勾上 `force: true`),它会替你解析 latest release 然后调起这个 workflow。
-
-#### 高级:覆盖构建流水线版本
-
-可选输入 `workflow_ref` 决定**用哪个版本的 `custom-build.yml`** 作为编译流水线。
-留空(默认)→ 跟随 `ref`,这样 `v1.2.0` 用 `custom-build.yml@v1.2.0`,`main` 用
-`@main`。设成 `main` → 强制用最新流水线编译某个旧 ref(例如回填一个老 release,
-但想用上新加的 cross 工具链修复)。
+`ref` 是必填的。要"构建上游最新 release 但不想手填版本号",请改去 Actions 页面
+跑一次 **Watch Upstream**(勾上 `force: true`),它会替你解析 latest release
+然后调起这个 workflow。
 
 ## 在客户端使用自定义编译
 
@@ -146,9 +141,11 @@ A: 通常什么都不用做。下次新 tag 发布时,新 tag 自带新的 `cust
 你的模版会自动用上去。如果想立刻在分支构建上试用,手动 `workflow_dispatch`
 传 `ref: main` 即可,会用 `custom-build.yml@main`。
 
-**Q: 工作流逻辑会被强制锁死在某个 ref 吗?**
-A: 默认严格跟随源码 ref。需要换流水线时,手动 dispatch `Build OxiDNS Release`,
-在 `workflow_ref` 输入框填 `main`(或任意 ref)即可。一次性的,不用改文件。
+**Q: 我想把构建流水线锁定到某个 tag,可以吗?**
+A: 可以,但需要手动改一行代码。编辑 `.github/workflows/build.yml`,把
+`uses: svenshi/oxidns/.github/workflows/custom-build.yml@main` 里的 `@main`
+改成具体的 ref(例如 `@v1.2.0`)。Push 之后所有构建都会用那个版本的 pipeline。
+不能通过输入参数动态切换 —— GitHub Actions 不允许 `uses:` 行用表达式。
 
 **Q: 能编译上游 PR 分支或某个 commit 吗?**
 A: 直接手动 `workflow_dispatch` 给 build.yml 传 `ref: feature/foo` 或

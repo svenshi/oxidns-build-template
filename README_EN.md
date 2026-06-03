@@ -17,11 +17,12 @@ svenshi/oxidns                    your-name/oxidns-build (from template)
                                             ▼  reads build.config.yml
                                     build.yml (thin shell)
                                             │
-                                            ▼  uses: svenshi/oxidns/...@<same ref as source>
+                                            ▼  uses: svenshi/oxidns/...@main
                           ┌────────────────────────────────────┐
                           │ svenshi/oxidns/.github/workflows/  │
                           │      custom-build.yml              │  ← build matrix
-                          │  (runs on the caller's runner)     │
+                          │  (runs on the caller's runner,     │
+                          │   checks out source at inputs.ref) │
                           └─────────────────┬──────────────────┘
                                             ▼
                                   publishes to your-name/oxidns-build releases
@@ -35,15 +36,15 @@ live upstream in
 Derivative repos only carry a ~50-line shell — they don't need to clone
 the matrix.
 
-When building a given ref, the template uses **the `custom-build.yml`
-that exists at the same ref** (for example, building `v1.2.0` calls
-`custom-build.yml@v1.2.0`; building the `main` branch calls
-`custom-build.yml@main`). This keeps the build pipeline tightly tied to
-the source it's building — pipeline tweaks on `main` never reach into
-historical release builds, and new features ship together with their
-source code at tag time. When the workflow file does not exist at a
-given ref (very old releases predating `custom-build.yml`), the
-template automatically falls back to `@main`.
+**Why the `@main` is hardcoded**: GitHub Actions does not currently
+honor `inputs.*` / `needs.*` / `vars.*` expressions in the `uses:`
+field of jobs that call a reusable workflow (the 2024-03 changelog
+claims it works, but the workflow validator still rejects every
+non-literal value). So the **pipeline yaml is pinned to `@main`, but
+the source ref being built is fully dynamic** — `custom-build.yml`
+itself uses `actions/checkout` to fetch svenshi/oxidns at `inputs.ref`.
+This is actually the saner default: pipeline bug-fixes on `main` apply
+uniformly to every rebuild, including historical tags.
 
 ## Quick start
 
@@ -74,19 +75,10 @@ set the `ref` input:
 > the latest stable release and clients must pass `--allow-prerelease` to
 > upgrade to them.
 
-`ref` is required (GitHub Actions does not allow `uses:` refs to be
-computed dynamically). To build "upstream's latest release" without typing
+`ref` is required. To build "upstream's latest release" without typing
 the version, head to the Actions tab and run **Watch Upstream** with
 `force: true`. It resolves the latest release and triggers this workflow
 with the correct values.
-
-#### Advanced: overriding the build pipeline version
-
-The optional `workflow_ref` input picks **which version of
-`custom-build.yml`** to use as the pipeline. Empty (default) → follows
-`ref`, so `v1.2.0` uses `custom-build.yml@v1.2.0` and `main` uses `@main`.
-Set to `main` to force a stale ref through the latest pipeline (e.g.
-backfill an old release with a newer cross-toolchain fix).
 
 ## Using a custom build on the client
 
@@ -163,10 +155,12 @@ A: Usually nothing. The next upstream tag bundles the matching
 that tag is built. To try it now, manually `workflow_dispatch` with
 `ref: main` — it will use `custom-build.yml@main`.
 
-**Q: Is the workflow logic always locked to the source ref?**
-A: By default, yes. To override for a single build, manually dispatch
-`Build OxiDNS Release` and set the `workflow_ref` input to `main` (or
-any ref). One-off, no need to edit files.
+**Q: Can I pin the build pipeline to a specific tag?**
+A: Yes, but only by editing one line. In `.github/workflows/build.yml`,
+change `uses: svenshi/oxidns/.github/workflows/custom-build.yml@main`
+to a concrete ref (e.g. `@v1.2.0`). Push, and every subsequent build
+uses that pipeline version. There is no way to switch dynamically via
+inputs — GitHub Actions does not allow expressions in the `uses:` line.
 
 **Q: Can I build a PR branch or a specific commit?**
 A: Manually `workflow_dispatch` `build.yml` with `ref: feature/foo` or
