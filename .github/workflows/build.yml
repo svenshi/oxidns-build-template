@@ -3,39 +3,21 @@ name: Build OxiDNS Release
 # Thin shell: reads build.config.yml and forwards the parameters to the
 # reusable workflow hosted in the upstream svenshi/oxidns repo.
 #
-# `ref` (required) selects the upstream source ref to build:
-#   * a tag (v1.2.0)    → builds and publishes a normal release
-#   * a branch (main)   → builds and publishes a prerelease tagged
-#                         `branch-<sanitized>-<sha7>`
-#   * a commit SHA      → same as branch
-#
-# To build "upstream's latest release" without typing the tag, run
-# `Watch Upstream` with `force: true` instead — it resolves the latest
-# release and triggers this workflow with explicit values.
-#
-# About the hardcoded `@main` on the `uses:` line below:
-# GitHub Actions does not currently honor `inputs.*` / `needs.*` /
-# `vars.*` expressions in the `uses` field for reusable workflows,
-# despite the 2024-03 changelog claiming it does. Every attempt to use
-# expressions there fails with `Unrecognized named-value` at workflow
-# validation time. So the pipeline version is fixed to `@main`, while
-# the SOURCE code being built is dynamic (custom-build.yml itself
-# checks out svenshi/oxidns at `inputs.ref`).
-#
-# This is actually the better default: a pipeline fix on main applies
-# uniformly to every rebuild, including historical tags.
+# The build matrix / naming / packaging logic all live upstream in
+# .github/workflows/custom-build.yml — pipeline improvements there
+# propagate without touching this repo.
 
 on:
   workflow_call:
     inputs:
-      ref:
-        description: 'Upstream git ref to build (branch / tag / SHA).'
+      tag:
+        description: 'Upstream oxidns release tag (e.g. v1.2.0)'
         required: true
         type: string
   workflow_dispatch:
     inputs:
-      ref:
-        description: 'Upstream git ref to build (branch / tag / SHA, e.g. v1.2.0, main, abc1234).'
+      tag:
+        description: 'Upstream oxidns release tag (e.g. v1.2.0)'
         required: true
         type: string
 
@@ -43,21 +25,16 @@ permissions:
   contents: write
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Parse build.config.yml and compute the release_tag + prerelease flag for
-  # the given source ref. These outputs flow through `with:` which DOES
-  # accept `needs.*.outputs.*` (unlike the `uses:` ref, see file header).
-  # ---------------------------------------------------------------------------
-  plan:
+  # Parse build.config.yml into the inputs expected by the upstream
+  # reusable workflow.
+  config:
     runs-on: ubuntu-latest
     outputs:
-      bundle:      ${{ steps.config.outputs.bundle }}
-      features:    ${{ steps.config.outputs.features }}
-      targets:     ${{ steps.config.outputs.targets }}
-      upx:         ${{ steps.config.outputs.upx }}
-      make_deb:    ${{ steps.config.outputs.make_deb }}
-      release_tag: ${{ steps.tag.outputs.release_tag }}
-      prerelease:  ${{ steps.tag.outputs.prerelease }}
+      bundle:   ${{ steps.read.outputs.bundle }}
+      features: ${{ steps.read.outputs.features }}
+      targets:  ${{ steps.read.outputs.targets }}
+      upx:      ${{ steps.read.outputs.upx }}
+      make_deb: ${{ steps.read.outputs.make_deb }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,8 +44,7 @@ jobs:
             https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - id: config
-        name: Read build.config.yml
+      - id: read
         run: |
           set -euo pipefail
           {
@@ -77,65 +53,19 @@ jobs:
             echo "targets=$(yq -o=json -I=0 '.targets' build.config.yml)"
             echo "upx=$(yq '.upx' build.config.yml)"
             echo "make_deb=$(yq '.make_deb' build.config.yml)"
-            echo "upstream=$(yq '.upstream' build.config.yml)"
           } >> "$GITHUB_OUTPUT"
 
-      - id: tag
-        name: Compute release_tag and prerelease flag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REF: ${{ inputs.ref }}
-          UPSTREAM: ${{ steps.config.outputs.upstream }}
-        run: |
-          set -euo pipefail
-
-          # For non-semver refs, append a 7-char commit SHA so the release
-          # tag is unique per commit and re-triggers replace the matching
-          # release cleanly instead of polluting the feed.
-          SHA=$(gh api "repos/$UPSTREAM/commits/$REF" --jq '.sha' 2>/dev/null | head -c 7 || echo "")
-
-          # A semver-ish tag (v1.2.3 / v1.2.3-rc1) → publish as a normal
-          # release. Anything else → publish as a prerelease tagged
-          # `branch-<sanitized>-<sha7>`.
-          if [[ "$REF" =~ ^v[0-9]+\.[0-9]+ ]]; then
-            RELEASE_TAG="$REF"
-            PRERELEASE=false
-          else
-            SANITIZED=$(echo "$REF" | tr '/ ' '--' | tr -cd 'a-zA-Z0-9._-')
-            if [ -n "$SHA" ]; then
-              RELEASE_TAG="branch-${SANITIZED}-${SHA}"
-            else
-              RELEASE_TAG="branch-${SANITIZED}"
-            fi
-            PRERELEASE=true
-          fi
-
-          {
-            echo "release_tag=$RELEASE_TAG"
-            echo "prerelease=$PRERELEASE"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "release_tag=$RELEASE_TAG"
-          echo "prerelease=$PRERELEASE"
-
-  # ---------------------------------------------------------------------------
-  # Call the upstream reusable workflow. The pipeline version is hardcoded
-  # to @main; the SOURCE ref is forwarded through `with: ref:` so each build
-  # builds the requested source while sharing one common pipeline.
-  #
-  # github.repository / GITHUB_TOKEN belong to this repo, so the release is
-  # published here automatically.
-  # ---------------------------------------------------------------------------
+  # Call the upstream reusable workflow. `github.repository` and
+  # `GITHUB_TOKEN` belong to the caller (this repo), so the release is
+  # published into this repo automatically.
   build:
-    needs: plan
+    needs: config
     uses: svenshi/oxidns/.github/workflows/custom-build.yml@main
     with:
-      ref:         ${{ inputs.ref }}
-      release_tag: ${{ needs.plan.outputs.release_tag }}
-      prerelease:  ${{ fromJson(needs.plan.outputs.prerelease) }}
-      bundle:      ${{ needs.plan.outputs.bundle }}
-      features:    ${{ needs.plan.outputs.features }}
-      targets:     ${{ needs.plan.outputs.targets }}
-      upx:         ${{ fromJson(needs.plan.outputs.upx) }}
-      make_deb:    ${{ fromJson(needs.plan.outputs.make_deb) }}
+      tag:      ${{ inputs.tag }}
+      bundle:   ${{ needs.config.outputs.bundle }}
+      features: ${{ needs.config.outputs.features }}
+      targets:  ${{ needs.config.outputs.targets }}
+      upx:      ${{ fromJson(needs.config.outputs.upx) }}
+      make_deb: ${{ fromJson(needs.config.outputs.make_deb) }}
     secrets: inherit

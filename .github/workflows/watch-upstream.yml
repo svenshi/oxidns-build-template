@@ -7,10 +7,6 @@ name: Watch Upstream
 # Manual workflow_dispatch (force: true) re-resolves the latest release
 # and rebuilds it — handy for first-time setup or recovering from a failed
 # previous run.
-#
-# When upstream has no releases yet, this workflow stays idle. To test the
-# pipeline during early development, kick off `Build OxiDNS Release`
-# manually with a branch / commit ref.
 
 on:
   schedule:
@@ -30,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       new: ${{ steps.check.outputs.new }}
-      ref: ${{ steps.check.outputs.ref }}
+      tag: ${{ steps.check.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,7 +47,7 @@ jobs:
 
           LATEST=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName 2>/dev/null || true)
           if [ -z "$LATEST" ]; then
-            echo "::notice::upstream $UPSTREAM has no releases yet — skipping. Use 'Build OxiDNS Release' manually with a branch / commit ref to test."
+            echo "::notice::upstream $UPSTREAM has no releases yet — skipping."
             echo "new=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -61,21 +57,18 @@ jobs:
             "$LATEST" --json tagName -q .tagName 2>/dev/null || echo "")
           echo "last_built=$LAST_BUILT"
 
-          if [ -n "$LAST_BUILT" ] && [ "$FORCE" != "true" ]; then
+          if [ -z "$LAST_BUILT" ] || [ "$FORCE" = "true" ]; then
+            echo "new=true"  >> "$GITHUB_OUTPUT"
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+          else
             echo "new=false" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
-
-          {
-            echo "new=true"
-            echo "ref=$LATEST"
-          } >> "$GITHUB_OUTPUT"
 
   trigger:
     needs: detect
     if: needs.detect.outputs.new == 'true'
     uses: ./.github/workflows/build.yml
     with:
-      ref: ${{ needs.detect.outputs.ref }}
+      tag: ${{ needs.detect.outputs.tag }}
     permissions:
       contents: write
