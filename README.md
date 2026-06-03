@@ -1,5 +1,7 @@
 # OxiDNS 自定义编译模版
 
+中文 | [English](README_EN.md)
+
 这是一个 **GitHub Template Repository** —— 用 "Use this template" 生成你自己的副本,
 就能定制 [OxiDNS](https://github.com/svenshi/oxidns) 的 features 和目标平台,
 在上游每次发布 release 时自动重新编译并发布到你自己的仓库 release。
@@ -44,6 +46,21 @@ svenshi/oxidns                    your-name/oxidns-build (从模版生成)
 
 之后每 30 分钟轮询一次上游 latest release,有新版本就自动编译并发布到你的仓库。
 
+### 指定 branch / tag / commit 编译
+
+上游还没发布过 release,或者需要测试某个分支 / PR / commit 时,直接手动触发
+**Build OxiDNS Release**,在 `ref` 输入框里填:
+
+| `ref` 取值 | 行为 |
+|---|---|
+| 留空(默认) | 取上游 latest release tag;若上游一个 release 都没有,回退到默认分支 |
+| `v1.2.0`(语义化版本 tag) | 编译该 tag,发布为正式 release |
+| `main` / `feature/foo`(分支名) | 编译该分支当前 HEAD,发布为 prerelease,tag 格式 `branch-<分支>-<sha7>` |
+| `abc1234`(commit SHA) | 编译该 commit,发布为 prerelease,tag 格式同上 |
+
+> 分支 / commit 构建发布的是 **prerelease**,既不会覆盖正式版,客户端也要显式
+> 加 `--allow-prerelease` 才会被升级到。
+
 ## 在客户端使用自定义编译
 
 ```bash
@@ -73,6 +90,16 @@ plugins:
     args:
       repository: your-name/oxidns-build
       bundle: full
+```
+
+升级到分支 / commit 构建时,加上 `--target` 指向具体的 prerelease tag:
+
+```bash
+oxidns upgrade apply \
+  --repository your-name/oxidns-build \
+  --target branch-main-abc1234 \
+  --bundle full \
+  --allow-prerelease
 ```
 
 ## 产物命名 (必须与上游对齐,否则升级会失败)

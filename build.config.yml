@@ -1,38 +1,40 @@
 # =============================================================================
-# OxiDNS 自定义编译配置
+# OxiDNS custom build configuration
 # =============================================================================
-# 这是模版仓库里唯一需要你编辑的文件。改完 push 到 main 即可,
-# `watch-upstream.yml` 会在上游每次发布 release 时自动触发编译。
+# This is the only file you need to edit in the template repo. Push to main
+# and `watch-upstream.yml` will automatically rebuild on every upstream
+# release.
 #
-# 也可以在仓库的 Actions 页面手动触发 "Build OxiDNS Release"。
+# You can also trigger "Build OxiDNS Release" manually from the Actions tab.
 # =============================================================================
 
-# 上游 oxidns 仓库,通常不需要改。
+# Upstream oxidns repository. Usually no need to change.
 upstream: svenshi/oxidns
 
-# 要编译的 bundle —— 决定产物文件名以及压缩包里是否包含 webui。
+# Which bundle to build — determines the asset filename and whether the
+# archive contains the WebUI.
 #
-#   full      = oxidns-{target}.tar.gz           (含 webui)
-#   standard  = oxidns-standard-{target}.tar.gz  (含 webui)
-#   minimal   = oxidns-minimal-{target}.tar.gz   (不含 webui)
-#   custom    = oxidns-{target}.tar.gz           (按 features 自定义,文件名同 full)
+#   full      = oxidns-{target}.tar.gz           (with webui)
+#   standard  = oxidns-standard-{target}.tar.gz  (with webui)
+#   minimal   = oxidns-minimal-{target}.tar.gz   (no webui)
+#   custom    = oxidns-{target}.tar.gz           (your own features, same filename as full)
 #
-# `custom` 模式下,oxidns upgrade 需要显式传 `--bundle full` 或 `--asset <name>`,
-# 因为 `--bundle auto` 在 PRIMARY_BUNDLE=custom 时会拒绝执行。
+# In `custom` mode, `oxidns upgrade` must be invoked with `--bundle full` or
+# `--asset <name>`. `--bundle auto` refuses to run when PRIMARY_BUNDLE=custom.
 bundle: custom
 
-# 仅 `bundle: custom` 时生效。一组 Cargo feature 名(对应 oxidns Cargo.toml
-# 里的 [features] 段)。常用组合参考:
+# Only used when `bundle: custom`. A list of Cargo feature names matching the
+# [features] section in upstream oxidns Cargo.toml. Common combinations:
 #
-#   - 家用路由器 (含 webui):
+#   - Home router (with webui):
 #       [api, webui, server-doh, server-dot, upstream-doh, upstream-dot,
 #        plugin-cron, plugin-dynamic-domain, provider-protobuf,
 #        provider-adguard-rule, plugin-upgrade]
 #
-#   - 极简转发器 (无 webui, 体积最小):
+#   - Slim forwarder (no webui, smallest size):
 #       [minimal]
 #
-#   - 标准 + 自定义增强:
+#   - Standard + extra plugins:
 #       [standard, plugin-mikrotik, plugin-ipset]
 features:
   - api
@@ -50,8 +52,9 @@ features:
   - plugin-upgrade
   - plugin-download
 
-# 要编译的目标平台。注释掉不需要的来加快 CI。
-# 完整列表必须用 oxidns 官方支持的 triple,否则 `oxidns upgrade` 找不到 asset。
+# Target triples to build. Comment out targets you don't need to speed up CI.
+# Must use the triples officially supported by upstream oxidns, otherwise
+# `oxidns upgrade` will not be able to find the asset.
 targets:
   - x86_64-unknown-linux-gnu
   - x86_64-unknown-linux-musl
@@ -66,9 +69,10 @@ targets:
   # - i686-pc-windows-msvc
   # - aarch64-pc-windows-msvc
 
-# 是否用 UPX 压缩二进制 (Linux/Windows 上有效, macOS/FreeBSD 跳过)。
-# 与上游一致默认开启,但失败不会终止流水线。
+# Run UPX on the produced binary (Linux/Windows only; macOS/FreeBSD skipped).
+# Matches upstream default. UPX failures do not fail the pipeline.
 upx: true
 
-# 是否同时生成 .deb 包 (仅对 x86_64-unknown-linux-gnu 和 aarch64-unknown-linux-gnu 有效)。
+# Also produce .deb packages (only for x86_64-unknown-linux-gnu and
+# aarch64-unknown-linux-gnu).
 make_deb: false

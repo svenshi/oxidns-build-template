@@ -1,16 +1,23 @@
 name: Watch Upstream
 
-# 每 30 分钟轮询上游 oxidns 仓库的 latest release。
-# 检测到新版本就触发 build.yml,产出与上游版本同 tag 的 release。
+# Polls the upstream oxidns repo's latest release every 30 minutes. When a
+# new version is detected, triggers build.yml and produces a matching release
+# in this repo with the same tag as upstream.
 #
-# 也可以从 Actions 页手动 Run workflow 强制重新编译当前 latest。
+# When upstream has no releases yet, this workflow stays idle — kick off a
+# manual `Build OxiDNS Release` (with optional `ref:` input) to test branch
+# / commit builds during early development.
+#
+# You can also "Run workflow" manually from the Actions tab to force a
+# rebuild of the current latest release.
+
 on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       force:
-        description: '即使本仓库已有该 tag 也强制重建'
+        description: 'Force rebuild even if this repo already has the tag'
         type: boolean
         default: false
 
@@ -41,7 +48,12 @@ jobs:
           UPSTREAM=$(yq '.upstream' build.config.yml)
           echo "upstream=$UPSTREAM"
 
-          LATEST=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
+          LATEST=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName 2>/dev/null || true)
+          if [ -z "$LATEST" ]; then
+            echo "::notice::upstream $UPSTREAM has no releases yet — skipping. Use 'Build OxiDNS Release' manually with a branch / commit ref to test."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "latest=$LATEST"
 
           LAST_BUILT=$(gh release view --repo "${{ github.repository }}" \
@@ -60,6 +72,6 @@ jobs:
     if: needs.detect.outputs.new == 'true'
     uses: ./.github/workflows/build.yml
     with:
-      tag: ${{ needs.detect.outputs.tag }}
+      ref: ${{ needs.detect.outputs.tag }}
     permissions:
       contents: write

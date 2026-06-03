@@ -1,39 +1,57 @@
 name: Build OxiDNS Release
 
-# 这个 workflow 是个薄壳:读 build.config.yml,把参数喂给上游
-# svenshi/oxidns 仓库里维护的 reusable workflow。
+# Thin shell: reads build.config.yml, resolves the git ref to build, and
+# forwards the parameters to the reusable workflow hosted in the upstream
+# svenshi/oxidns repo.
 #
-# 编译矩阵 / 命名 / 打包逻辑都在上游的 .github/workflows/custom-build.yml,
-# 这样上游改了构建流程,所有用户重新触发即可,不需要更新模版仓库。
+# `ref` can be:
+#   - empty (default)   → resolves to upstream's latest release tag, or to
+#                         the upstream default branch when no release exists
+#   - a tag (v1.2.0)    → builds and publishes a normal release
+#   - a branch (main)   → builds and publishes a prerelease tagged
+#                         `branch-<sanitized>-<sha7>`
+#   - a commit SHA      → same as branch
+#
+# The build matrix / naming / packaging logic all live upstream in
+# .github/workflows/custom-build.yml — that way pipeline improvements
+# propagate without touching this repo.
 
 on:
   workflow_call:
     inputs:
-      tag:
-        description: '上游 oxidns 的 release tag (例: v1.2.0)'
-        required: true
+      ref:
+        description: 'Upstream git ref to build (branch / tag / SHA). Empty = latest upstream release.'
+        required: false
+        default: ''
         type: string
   workflow_dispatch:
     inputs:
-      tag:
-        description: '上游 oxidns 的 release tag (例: v1.2.0)'
-        required: true
+      ref:
+        description: 'Upstream git ref to build (branch / tag / SHA). Leave empty for latest upstream release.'
+        required: false
+        default: ''
         type: string
 
 permissions:
   contents: write
 
 jobs:
-  # 读取 build.config.yml,转成上游 reusable workflow 的输入。
-  config:
+  # ---------------------------------------------------------------------------
+  # Parse build.config.yml AND resolve the ref / release tag / prerelease flag.
+  # Combined into one job so the resolution context (upstream repo, gh CLI)
+  # is shared with the config read.
+  # ---------------------------------------------------------------------------
+  plan:
     runs-on: ubuntu-latest
     outputs:
-      bundle:   ${{ steps.read.outputs.bundle }}
-      features: ${{ steps.read.outputs.features }}
-      targets:  ${{ steps.read.outputs.targets }}
-      upx:      ${{ steps.read.outputs.upx }}
-      make_deb: ${{ steps.read.outputs.make_deb }}
-      ref:      ${{ steps.read.outputs.ref }}
+      bundle:      ${{ steps.config.outputs.bundle }}
+      features:    ${{ steps.config.outputs.features }}
+      targets:     ${{ steps.config.outputs.targets }}
+      upx:         ${{ steps.config.outputs.upx }}
+      make_deb:    ${{ steps.config.outputs.make_deb }}
+      ref:         ${{ steps.resolve.outputs.ref }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      prerelease:  ${{ steps.resolve.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +61,8 @@ jobs:
             https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - id: read
+      - id: config
+        name: Read build.config.yml
         run: |
           set -euo pipefail
           {
@@ -52,21 +71,79 @@ jobs:
             echo "targets=$(yq -o=json -I=0 '.targets' build.config.yml)"
             echo "upx=$(yq '.upx' build.config.yml)"
             echo "make_deb=$(yq '.make_deb' build.config.yml)"
-            # ref 锁定上游 reusable workflow 的版本。默认跟随上游 tag,
-            # 这样不同版本的编译流程改动可以平滑共存。改成 main 走最新逻辑。
-            echo "ref=${{ inputs.tag }}"
+            echo "upstream=$(yq '.upstream' build.config.yml)"
           } >> "$GITHUB_OUTPUT"
 
-  # 调用上游 reusable workflow。github.repository / GITHUB_TOKEN 都是
-  # 调用方(本仓库)的,所以 release 会自动发布到本仓库。
+      - id: resolve
+        name: Resolve ref / release tag / prerelease flag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_REF: ${{ inputs.ref }}
+          UPSTREAM: ${{ steps.config.outputs.upstream }}
+        run: |
+          set -euo pipefail
+
+          # Step 1: resolve the ref.
+          if [ -n "$INPUT_REF" ]; then
+            REF="$INPUT_REF"
+            echo "Using explicit ref: $REF"
+          else
+            # Default: latest upstream release.
+            REF=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName 2>/dev/null || true)
+            if [ -z "$REF" ]; then
+              # Upstream has no releases yet — fall back to the default branch
+              # so the template still works during early development.
+              REF=$(gh api "repos/$UPSTREAM" --jq .default_branch)
+              echo "::notice::upstream $UPSTREAM has no releases yet, falling back to default branch: $REF"
+            else
+              echo "Defaulted to upstream latest release: $REF"
+            fi
+          fi
+
+          # Step 2: resolve the commit SHA (7 chars) for non-tag refs so the
+          # generated release tag is unique per commit.
+          SHA=$(gh api "repos/$UPSTREAM/commits/$REF" --jq '.sha' 2>/dev/null | head -c 7 || echo "")
+
+          # Step 3: pick release_tag + prerelease.
+          # A semver-ish tag (v1.2.3 / v1.2.3-rc1) → publish as a normal release.
+          # Anything else → publish as `branch-<sanitized>-<sha7>` prerelease.
+          if [[ "$REF" =~ ^v[0-9]+\.[0-9]+ ]]; then
+            RELEASE_TAG="$REF"
+            PRERELEASE=false
+          else
+            SANITIZED=$(echo "$REF" | tr '/ ' '--' | tr -cd 'a-zA-Z0-9._-')
+            if [ -n "$SHA" ]; then
+              RELEASE_TAG="branch-${SANITIZED}-${SHA}"
+            else
+              RELEASE_TAG="branch-${SANITIZED}"
+            fi
+            PRERELEASE=true
+          fi
+
+          {
+            echo "ref=$REF"
+            echo "release_tag=$RELEASE_TAG"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "ref=$REF"
+          echo "release_tag=$RELEASE_TAG"
+          echo "prerelease=$PRERELEASE"
+
+  # ---------------------------------------------------------------------------
+  # Call the upstream reusable workflow. github.repository / GITHUB_TOKEN
+  # belong to this repo, so the release is published here automatically.
+  # ---------------------------------------------------------------------------
   build:
-    needs: config
+    needs: plan
     uses: svenshi/oxidns/.github/workflows/custom-build.yml@main
     with:
-      tag:      ${{ inputs.tag }}
-      bundle:   ${{ needs.config.outputs.bundle }}
-      features: ${{ needs.config.outputs.features }}
-      targets:  ${{ needs.config.outputs.targets }}
-      upx:      ${{ fromJson(needs.config.outputs.upx) }}
-      make_deb: ${{ fromJson(needs.config.outputs.make_deb) }}
+      ref:         ${{ needs.plan.outputs.ref }}
+      release_tag: ${{ needs.plan.outputs.release_tag }}
+      prerelease:  ${{ fromJson(needs.plan.outputs.prerelease) }}
+      bundle:      ${{ needs.plan.outputs.bundle }}
+      features:    ${{ needs.plan.outputs.features }}
+      targets:     ${{ needs.plan.outputs.targets }}
+      upx:         ${{ fromJson(needs.plan.outputs.upx) }}
+      make_deb:    ${{ fromJson(needs.plan.outputs.make_deb) }}
     secrets: inherit
