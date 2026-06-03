@@ -17,7 +17,7 @@ svenshi/oxidns                    your-name/oxidns-build (from template)
                                             ▼  reads build.config.yml
                                     build.yml (thin shell)
                                             │
-                                            ▼  uses: svenshi/oxidns/...@main
+                                            ▼  uses: svenshi/oxidns/...@<same ref as source>
                           ┌────────────────────────────────────┐
                           │ svenshi/oxidns/.github/workflows/  │
                           │      custom-build.yml              │  ← build matrix
@@ -32,9 +32,18 @@ svenshi/oxidns                    your-name/oxidns-build (from template)
 **Key point**: the actual build matrix, naming, and packaging logic all
 live upstream in
 [`.github/workflows/custom-build.yml`](https://github.com/svenshi/oxidns/blob/main/.github/workflows/custom-build.yml).
-When upstream improves the build pipeline, every derivative repo
-**automatically picks it up** without local updates — that's the whole
-point of calling this a "reusable workflow".
+Derivative repos only carry a ~50-line shell — they don't need to clone
+the matrix.
+
+When building a given ref, the template uses **the `custom-build.yml`
+that exists at the same ref** (for example, building `v1.2.0` calls
+`custom-build.yml@v1.2.0`; building the `main` branch calls
+`custom-build.yml@main`). This keeps the build pipeline tightly tied to
+the source it's building — pipeline tweaks on `main` never reach into
+historical release builds, and new features ship together with their
+source code at tag time. When the workflow file does not exist at a
+given ref (very old releases predating `custom-build.yml`), the
+template automatically falls back to `@main`.
 
 ## Quick start
 
@@ -136,14 +145,22 @@ Identical to upstream `release.yml`:
 ## FAQ
 
 **Q: Upstream changed the build pipeline — what do I do?**
-A: Usually nothing. The template's `build.yml` pins to
-`svenshi/oxidns@main`, so the next trigger picks up the latest logic
-automatically. Pin to `@v1.2.0` (or any tag) if you want a fixed version.
+A: Usually nothing. The next upstream tag bundles the matching
+`custom-build.yml`, and your template picks it up automatically when
+that tag is built. To try it now, manually `workflow_dispatch` with
+`ref: main` — it will use `custom-build.yml@main`.
+
+**Q: Is the workflow logic always locked to the source ref?**
+A: By default, yes. If you need to backfill an old release with a
+newer build pipeline (for example, a `cross` toolchain fix on `main`
+that you want applied to historical tags), edit the `uses:` line in
+`build.yml` and replace `@${{ needs.plan.outputs.workflow_ref }}` with
+`@main`.
 
 **Q: Can I build a PR branch or a specific commit?**
-A: Tweak `watch-upstream.yml` to use `git rev-parse` instead of "latest
-release", or manually `workflow_dispatch` `build.yml` with a tag, branch,
-or SHA.
+A: Manually `workflow_dispatch` `build.yml` with `ref: feature/foo` or
+`ref: abc1234` — it publishes as a prerelease. See "Building from a
+branch / tag / commit" above.
 
 **Q: How long is the cron delay?**
 A: GitHub cron does not guarantee on-time firing — delays of 10+ minutes

@@ -16,7 +16,7 @@ svenshi/oxidns                    your-name/oxidns-build (从模版生成)
                                           ▼  读 build.config.yml
                                   build.yml (薄壳)
                                           │
-                                          ▼  uses: svenshi/oxidns/...@main
+                                          ▼  uses: svenshi/oxidns/...@<同源码 ref>
                           ┌───────────────────────────────────┐
                           │ svenshi/oxidns/.github/workflows/ │
                           │      custom-build.yml             │  ← 编译矩阵在这里
@@ -32,8 +32,14 @@ svenshi/oxidns                    your-name/oxidns-build (从模版生成)
 
 **关键点**:实际的编译矩阵、命名、打包逻辑全部在上游 `svenshi/oxidns`
 的 [`.github/workflows/custom-build.yml`](https://github.com/svenshi/oxidns/blob/main/.github/workflows/custom-build.yml) 中维护。
-上游改了构建流程,所有派生仓库**不需要更新**就自动跟上 —— 这也是把这套机制叫
-"reusable workflow" 的原因。
+派生仓库永远只持有一个 50 行的薄壳,不需要自己复制粘贴这套矩阵。
+
+模版在编译每个 ref 时,会优先用**同一个 ref 上的** `custom-build.yml`(例如
+编译 `v1.2.0` 时用 `custom-build.yml@v1.2.0`,编译 `main` 分支时用
+`custom-build.yml@main`)。这样工作流逻辑和源码版本严格绑定:
+上游在 `main` 改了构建流程不会反过来污染历史 release 的构建结果,新功能也只
+在切 tag 时随源码一起生效。当 ref 上不存在 `custom-build.yml`(例如非常老的
+release)时,自动回退到 `@main`。
 
 ## 快速开始
 
@@ -126,12 +132,18 @@ oxidns upgrade apply \
 ## FAQ
 
 **Q: 上游改了编译流程,我要做什么?**
-A: 通常什么都不用做。模版里的 `build.yml` 默认 pin 到 `svenshi/oxidns@main`,
-下次触发就自动用最新逻辑。要锁版本就把 `@main` 改成 `@v1.2.0` 之类的 tag。
+A: 通常什么都不用做。下次新 tag 发布时,新 tag 自带新的 `custom-build.yml`,
+你的模版会自动用上去。如果想立刻在分支构建上试用,手动 `workflow_dispatch`
+传 `ref: main` 即可,会用 `custom-build.yml@main`。
+
+**Q: 工作流逻辑会被强制锁死在某个 ref 吗?**
+A: 默认严格跟随源码 ref。如果想强制某个 ref 始终用 `@main` 的编译逻辑(例如
+回填一个老 release 但希望用上新的 cross 工具链),编辑 `build.yml` 里
+`uses:` 那一行,把 `@${{ needs.plan.outputs.workflow_ref }}` 改成 `@main`。
 
 **Q: 能编译上游 PR 分支或某个 commit 吗?**
-A: 改 `watch-upstream.yml` 把 latest release 检测换成 git rev-parse,或者直接手动
-`workflow_dispatch` 给 build.yml 传一个 tag/branch/SHA。
+A: 直接手动 `workflow_dispatch` 给 build.yml 传 `ref: feature/foo` 或
+`ref: abc1234`,会发布为 prerelease。详见上文"指定 branch / tag / commit 编译"。
 
 **Q: GitHub Actions 调度延迟?**
 A: cron 不保证准点触发,实际延迟可能到 10 分钟以上。需要实时性把改用上游的

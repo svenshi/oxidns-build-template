@@ -44,14 +44,15 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
-      bundle:      ${{ steps.config.outputs.bundle }}
-      features:    ${{ steps.config.outputs.features }}
-      targets:     ${{ steps.config.outputs.targets }}
-      upx:         ${{ steps.config.outputs.upx }}
-      make_deb:    ${{ steps.config.outputs.make_deb }}
-      ref:         ${{ steps.resolve.outputs.ref }}
-      release_tag: ${{ steps.resolve.outputs.release_tag }}
-      prerelease:  ${{ steps.resolve.outputs.prerelease }}
+      bundle:       ${{ steps.config.outputs.bundle }}
+      features:     ${{ steps.config.outputs.features }}
+      targets:      ${{ steps.config.outputs.targets }}
+      upx:          ${{ steps.config.outputs.upx }}
+      make_deb:     ${{ steps.config.outputs.make_deb }}
+      ref:          ${{ steps.resolve.outputs.ref }}
+      workflow_ref: ${{ steps.resolve.outputs.workflow_ref }}
+      release_tag:  ${{ steps.resolve.outputs.release_tag }}
+      prerelease:   ${{ steps.resolve.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
 
@@ -120,23 +121,44 @@ jobs:
             PRERELEASE=true
           fi
 
+          # Step 4: pick the workflow ref. By default we want to call
+          # custom-build.yml@<same ref as the source>, so the build pipeline
+          # stays self-consistent with the source it builds. Fall back to
+          # `main` when the workflow file does not exist at that ref (e.g.
+          # very old release tags from before custom-build.yml was added).
+          if gh api "repos/$UPSTREAM/contents/.github/workflows/custom-build.yml?ref=$REF" \
+               --jq .name >/dev/null 2>&1; then
+            WORKFLOW_REF="$REF"
+          else
+            WORKFLOW_REF=main
+            echo "::notice::custom-build.yml does not exist at $UPSTREAM@$REF — falling back to custom-build.yml@main"
+          fi
+
           {
             echo "ref=$REF"
+            echo "workflow_ref=$WORKFLOW_REF"
             echo "release_tag=$RELEASE_TAG"
             echo "prerelease=$PRERELEASE"
           } >> "$GITHUB_OUTPUT"
 
           echo "ref=$REF"
+          echo "workflow_ref=$WORKFLOW_REF"
           echo "release_tag=$RELEASE_TAG"
           echo "prerelease=$PRERELEASE"
 
   # ---------------------------------------------------------------------------
   # Call the upstream reusable workflow. github.repository / GITHUB_TOKEN
   # belong to this repo, so the release is published here automatically.
+  #
+  # The workflow ref is chosen by the `plan` job to match the source ref —
+  # so `custom-build.yml@v1.2.0` is used to build v1.2.0, and
+  # `custom-build.yml@main` for branch builds. This keeps the build pipeline
+  # version-locked to the source it builds, instead of always picking up
+  # whatever happens to be on `main` today.
   # ---------------------------------------------------------------------------
   build:
     needs: plan
-    uses: svenshi/oxidns/.github/workflows/custom-build.yml@main
+    uses: svenshi/oxidns/.github/workflows/custom-build.yml@${{ needs.plan.outputs.workflow_ref }}
     with:
       ref:         ${{ needs.plan.outputs.ref }}
       release_tag: ${{ needs.plan.outputs.release_tag }}
