@@ -60,13 +60,12 @@ The watcher polls upstream's latest release every 30 minutes and rebuilds
 
 ### Building from a branch / tag / commit
 
-When upstream hasn't published any releases yet, or you want to test a
-specific branch / PR / commit, manually trigger **Build OxiDNS Release**
-and set the `ref` input:
+To test a specific branch / PR / commit, or to build a version other than
+upstream's latest release, manually trigger **Build OxiDNS Release** and
+set the `ref` input:
 
 | `ref` value | Behavior |
 |---|---|
-| empty (default) | Uses upstream's latest release tag; falls back to the default branch when upstream has no releases |
 | `v1.2.0` (semver tag) | Builds that tag and publishes a normal release |
 | `main` / `feature/foo` (branch) | Builds the branch HEAD, publishes a prerelease tagged `branch-<branch>-<sha7>` |
 | `abc1234` (commit SHA) | Builds the commit, publishes a prerelease with the same naming pattern |
@@ -74,6 +73,20 @@ and set the `ref` input:
 > Branch / commit builds publish as **prereleases**, so they never override
 > the latest stable release and clients must pass `--allow-prerelease` to
 > upgrade to them.
+
+`ref` is required (GitHub Actions does not allow `uses:` refs to be
+computed dynamically). To build "upstream's latest release" without typing
+the version, head to the Actions tab and run **Watch Upstream** with
+`force: true`. It resolves the latest release and triggers this workflow
+with the correct values.
+
+#### Advanced: overriding the build pipeline version
+
+The optional `workflow_ref` input picks **which version of
+`custom-build.yml`** to use as the pipeline. Empty (default) → follows
+`ref`, so `v1.2.0` uses `custom-build.yml@v1.2.0` and `main` uses `@main`.
+Set to `main` to force a stale ref through the latest pipeline (e.g.
+backfill an old release with a newer cross-toolchain fix).
 
 ## Using a custom build on the client
 
@@ -151,11 +164,9 @@ that tag is built. To try it now, manually `workflow_dispatch` with
 `ref: main` — it will use `custom-build.yml@main`.
 
 **Q: Is the workflow logic always locked to the source ref?**
-A: By default, yes. If you need to backfill an old release with a
-newer build pipeline (for example, a `cross` toolchain fix on `main`
-that you want applied to historical tags), edit the `uses:` line in
-`build.yml` and replace `@${{ needs.plan.outputs.workflow_ref }}` with
-`@main`.
+A: By default, yes. To override for a single build, manually dispatch
+`Build OxiDNS Release` and set the `workflow_ref` input to `main` (or
+any ref). One-off, no need to edit files.
 
 **Q: Can I build a PR branch or a specific commit?**
 A: Manually `workflow_dispatch` `build.yml` with `ref: feature/foo` or

@@ -1,15 +1,16 @@
 name: Watch Upstream
 
 # Polls the upstream oxidns repo's latest release every 30 minutes. When a
-# new version is detected, triggers build.yml and produces a matching release
-# in this repo with the same tag as upstream.
+# new version is detected, triggers build.yml and produces a matching
+# release in this repo with the same tag as upstream.
 #
-# When upstream has no releases yet, this workflow stays idle — kick off a
-# manual `Build OxiDNS Release` (with optional `ref:` input) to test branch
-# / commit builds during early development.
+# Manual workflow_dispatch (force: true) re-resolves the latest release
+# and rebuilds it — handy for first-time setup or recovering from a failed
+# previous run.
 #
-# You can also "Run workflow" manually from the Actions tab to force a
-# rebuild of the current latest release.
+# When upstream has no releases yet, this workflow stays idle. To test the
+# pipeline during early development, kick off `Build OxiDNS Release`
+# manually with a branch / commit ref.
 
 on:
   schedule:
@@ -28,8 +29,9 @@ jobs:
   detect:
     runs-on: ubuntu-latest
     outputs:
-      new: ${{ steps.check.outputs.new }}
-      tag: ${{ steps.check.outputs.tag }}
+      new:          ${{ steps.check.outputs.new }}
+      ref:          ${{ steps.check.outputs.ref }}
+      workflow_ref: ${{ steps.check.outputs.workflow_ref }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,18 +62,36 @@ jobs:
             "$LATEST" --json tagName -q .tagName 2>/dev/null || echo "")
           echo "last_built=$LAST_BUILT"
 
-          if [ -z "$LAST_BUILT" ] || [ "$FORCE" = "true" ]; then
-            echo "new=true"  >> "$GITHUB_OUTPUT"
-            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
-          else
+          if [ -n "$LAST_BUILT" ] && [ "$FORCE" != "true" ]; then
             echo "new=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          # Pick the workflow ref. By default we pin custom-build.yml to the
+          # same ref as the source so the pipeline tracks the version it
+          # builds. Fall back to `main` only when the workflow file does not
+          # exist at the source ref (e.g. very old release tags from before
+          # custom-build.yml was added).
+          if gh api "repos/$UPSTREAM/contents/.github/workflows/custom-build.yml?ref=$LATEST" \
+               --jq .name >/dev/null 2>&1; then
+            WORKFLOW_REF="$LATEST"
+          else
+            WORKFLOW_REF=main
+            echo "::notice::custom-build.yml does not exist at $UPSTREAM@$LATEST — falling back to custom-build.yml@main"
+          fi
+
+          {
+            echo "new=true"
+            echo "ref=$LATEST"
+            echo "workflow_ref=$WORKFLOW_REF"
+          } >> "$GITHUB_OUTPUT"
 
   trigger:
     needs: detect
     if: needs.detect.outputs.new == 'true'
     uses: ./.github/workflows/build.yml
     with:
-      ref: ${{ needs.detect.outputs.tag }}
+      ref:          ${{ needs.detect.outputs.ref }}
+      workflow_ref: ${{ needs.detect.outputs.workflow_ref }}
     permissions:
       contents: write

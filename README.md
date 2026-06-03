@@ -54,18 +54,28 @@ release)时,自动回退到 `@main`。
 
 ### 指定 branch / tag / commit 编译
 
-上游还没发布过 release,或者需要测试某个分支 / PR / commit 时,直接手动触发
-**Build OxiDNS Release**,在 `ref` 输入框里填:
+需要测试某个分支 / PR / commit,或者上游已经有了 release 但你想构建别的版本时,
+手动触发 **Build OxiDNS Release**,在 `ref` 输入框里填:
 
 | `ref` 取值 | 行为 |
 |---|---|
-| 留空(默认) | 取上游 latest release tag;若上游一个 release 都没有,回退到默认分支 |
 | `v1.2.0`(语义化版本 tag) | 编译该 tag,发布为正式 release |
 | `main` / `feature/foo`(分支名) | 编译该分支当前 HEAD,发布为 prerelease,tag 格式 `branch-<分支>-<sha7>` |
 | `abc1234`(commit SHA) | 编译该 commit,发布为 prerelease,tag 格式同上 |
 
 > 分支 / commit 构建发布的是 **prerelease**,既不会覆盖正式版,客户端也要显式
 > 加 `--allow-prerelease` 才会被升级到。
+
+`ref` 是必填的(GitHub Actions 限制 `uses:` 行不能从动态计算得到)。要"构建
+上游最新 release 但不想手填版本号",请改去 Actions 页面跑一次 **Watch Upstream**
+(勾上 `force: true`),它会替你解析 latest release 然后调起这个 workflow。
+
+#### 高级:覆盖构建流水线版本
+
+可选输入 `workflow_ref` 决定**用哪个版本的 `custom-build.yml`** 作为编译流水线。
+留空(默认)→ 跟随 `ref`,这样 `v1.2.0` 用 `custom-build.yml@v1.2.0`,`main` 用
+`@main`。设成 `main` → 强制用最新流水线编译某个旧 ref(例如回填一个老 release,
+但想用上新加的 cross 工具链修复)。
 
 ## 在客户端使用自定义编译
 
@@ -137,9 +147,8 @@ A: 通常什么都不用做。下次新 tag 发布时,新 tag 自带新的 `cust
 传 `ref: main` 即可,会用 `custom-build.yml@main`。
 
 **Q: 工作流逻辑会被强制锁死在某个 ref 吗?**
-A: 默认严格跟随源码 ref。如果想强制某个 ref 始终用 `@main` 的编译逻辑(例如
-回填一个老 release 但希望用上新的 cross 工具链),编辑 `build.yml` 里
-`uses:` 那一行,把 `@${{ needs.plan.outputs.workflow_ref }}` 改成 `@main`。
+A: 默认严格跟随源码 ref。需要换流水线时,手动 dispatch `Build OxiDNS Release`,
+在 `workflow_ref` 输入框填 `main`(或任意 ref)即可。一次性的,不用改文件。
 
 **Q: 能编译上游 PR 分支或某个 commit 吗?**
 A: 直接手动 `workflow_dispatch` 给 build.yml 传 `ref: feature/foo` 或
