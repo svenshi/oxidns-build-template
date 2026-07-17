@@ -12,7 +12,7 @@ release. The matching binaries get published to your own repo's releases.
 ```
 svenshi/oxidns                    your-name/oxidns-build (from template)
 ─────────────                     ──────────────────────────────────────
- release v1.2.0  ─poll every 30m─▶ watch-upstream.yml
+ release vX.Y.Z  ─poll every 30m─▶ watch-upstream.yml
                                             │
                                             ▼  reads build.config.yml
                                     build.yml (thin shell)
@@ -32,10 +32,16 @@ svenshi/oxidns                    your-name/oxidns-build (from template)
 **Key point**: the actual build matrix, naming, and packaging logic all
 live upstream in
 [`.github/workflows/custom-build.yml`](https://github.com/svenshi/oxidns/blob/main/.github/workflows/custom-build.yml).
-Derivative repos only carry a ~50-line shell — they don't need to clone
-the matrix. When upstream improves the build pipeline, every derivative
-repo **automatically picks it up** without local updates — that's the
-whole point of calling this a "reusable workflow".
+Derivative repos only carry a thin shell — they don't need to clone the
+matrix. When upstream improves the build pipeline, derivative repos usually
+pick it up **without updating their workflow** — that's the whole point of
+calling this a "reusable workflow".
+
+However, a custom feature list in `build.config.yml` is static configuration
+owned by the derivative repository and is not migrated automatically. When
+upstream adds, renames, or changes features, compare the list against the
+[`Cargo.toml`](https://github.com/svenshi/oxidns/blob/main/Cargo.toml) from the
+release tag you are building.
 
 ## Quick start
 
@@ -49,6 +55,20 @@ whole point of calling this a "reusable workflow".
 
 The watcher polls upstream's latest release every 30 minutes and rebuilds
 + publishes to your repo whenever a new version appears.
+
+Prefer the `minimal`, `standard`, or `full` presets for normal deployments.
+Use `custom` only when you need to remove or add specific capabilities. After
+changing custom features, also verify that your runtime `config.yaml` does not
+reference a protocol or plugin that was not compiled. Run `oxidns build-info`
+on the resulting binary to confirm its actual capabilities.
+
+Protocol features are grouped by responsibility: `server-*` controls inbound
+DNS services, `upstream-*` controls DNS upstreams such as `forward`, and
+`resolver-*` controls `network.outbound.resolver.nameservers`. The similarly
+named groups are not interchangeable.
+
+See the [OxiDNS Custom Build documentation](https://oxidns.org/en/custom-build)
+for the complete bundle matrix, feature list, and local build workflow.
 
 ## Using a custom build on the client
 
@@ -97,11 +117,11 @@ extraction paths in `oxidns upgrade`.
 
 ## Supported targets
 
-Identical to upstream `release.yml`:
+Identical to upstream `release.yml` (13 targets):
 
 - `x86_64-unknown-linux-gnu` / `x86_64-unknown-linux-musl`
 - `aarch64-unknown-linux-gnu` / `aarch64-unknown-linux-musl`
-- `i686-unknown-linux-musl` / `arm-unknown-linux-musleabihf`
+- `i686-unknown-linux-musl` / `arm-unknown-linux-musleabihf` / `armv7-unknown-linux-musleabihf`
 - `x86_64-apple-darwin` / `aarch64-apple-darwin`
 - `x86_64-unknown-freebsd`
 - `x86_64-pc-windows-msvc` / `i686-pc-windows-msvc` / `aarch64-pc-windows-msvc`
@@ -111,7 +131,9 @@ Identical to upstream `release.yml`:
 **Q: Upstream changed the build pipeline — what do I do?**
 A: Usually nothing. The template's `build.yml` pins to
 `svenshi/oxidns@main`, so the next trigger picks up the latest logic
-automatically. Pin to `@v1.2.0` (or any tag) if you want a fixed version.
+automatically. Pin to an actual tag such as `@vX.Y.Z` if you want a fixed
+version. If you use `bundle: custom`, still review your feature list for
+compatibility with the new release tag.
 
 **Q: How long is the cron delay?**
 A: GitHub cron does not guarantee on-time firing — delays of 10+ minutes

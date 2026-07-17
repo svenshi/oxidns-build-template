@@ -24,24 +24,33 @@ upstream: svenshi/oxidns
 bundle: custom
 
 # Only used when `bundle: custom`. A list of Cargo feature names matching the
-# [features] section in upstream oxidns Cargo.toml. Common combinations:
+# [features] section in Cargo.toml from the upstream release tag being built.
+# Preset bundles are the safer choice when no fine-grained customization is
+# needed. Common combinations:
 #
-#   - Home router (with webui):
-#       [api, webui, server-doh, server-dot, upstream-doh, upstream-dot,
-#        plugin-cron, plugin-dynamic-domain, provider-protobuf,
-#        provider-adguard-rule, plugin-upgrade]
+#   - Standard capabilities under a custom asset name:
+#       [standard]
 #
 #   - Slim forwarder (no webui, smallest size):
 #       [minimal]
 #
 #   - Standard + extra plugins:
 #       [standard, plugin-mikrotik, plugin-ipset]
+#
+# Protocol features are split by responsibility. `server-*` enables inbound
+# services, `upstream-*` enables DNS upstreams such as `forward`, and
+# `resolver-*` enables `network.outbound.resolver.nameservers`. Enable the
+# corresponding group for every protocol referenced by your runtime config.
+# After a build, run `oxidns build-info` to verify the compiled capabilities.
 features:
   - api
   - webui
   - metrics
   - server-dot
   - server-doh
+  - resolver-dot
+  - resolver-doh
+  - resolver-doq
   - upstream-dot
   - upstream-doh
   - upstream-doq
@@ -62,6 +71,7 @@ targets:
   - aarch64-unknown-linux-musl
   # - i686-unknown-linux-musl
   # - arm-unknown-linux-musleabihf
+  # - armv7-unknown-linux-musleabihf
   - x86_64-apple-darwin
   - aarch64-apple-darwin
   # - x86_64-unknown-freebsd
